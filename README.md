@@ -15,6 +15,8 @@ earbud orientation into head yaw / pitch / roll, and sends it to games as:
 No phone, no extra hardware, no root. Inspired by
 [MousePods](https://github.com/starman-tech/mousepods), which does the same for AirPods.
 
+![BudsTrack window](docs/screenshot.png)
+
 ## Status
 
 - Tested: Galaxy Buds3 Pro, Fedora 44 (KDE Plasma, BlueZ), Python 3.14.
