@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BudsTrack
+GenericName=Galaxy Buds head tracking
+Comment=Use Galaxy Buds3 Pro head tracking in games (opentrack, joystick, mouse look)
+Exec=sh -c 'exec python3 "$HOME/.local/share/budstrack/budstrack.py"'
+Icon=audio-headphones
+Categories=Game;Utility;
+Terminal=false
