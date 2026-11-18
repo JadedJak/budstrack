@@ -556,8 +556,10 @@ class UInput:
 class JoystickOut:
     def __init__(self, cfg):
         self.cfg = cfg
-        # ABS_X=yaw, ABS_Y=pitch, ABS_Z=roll; one button so SDL/Steam see a joystick.
-        self.ui = UInput("BudsTrack head tracker", keys=(0x120,), abses=(0, 1, 2))
+        # ABS_X=yaw, ABS_Y=pitch, ABS_RZ=roll. udev only tags a device as a
+        # joystick (and gives the desktop user access) if it has >= 2 joystick
+        # buttons/axes besides X/Y, so add RZ plus four (unused) buttons.
+        self.ui = UInput("BudsTrack head tracker", keys=(0x120, 0x121, 0x122, 0x123), abses=(0, 1, 5))
 
     def send(self, yaw, pitch, roll):
         c = self.cfg
@@ -566,7 +568,7 @@ class JoystickOut:
             return int(max(-1.0, min(1.0, v / rng)) * 32767)
         self.ui.emit([(EV_ABS, 0, ax(-yaw, c["joy_range_yaw"])),     # turn right = +X
                       (EV_ABS, 1, ax(-pitch, c["joy_range_pitch"])),  # look up = -Y
-                      (EV_ABS, 2, ax(roll, c["joy_range_roll"]))])
+                      (EV_ABS, 5, ax(roll, c["joy_range_roll"]))])
 
     def close(self):
         self.ui.close()
