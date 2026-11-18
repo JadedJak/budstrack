@@ -195,6 +195,8 @@ DEFAULTS = {
     "mouse_px_per_deg": 25.0,
     "mouse_pitch": True,
     "rate_hz": 120,
+    "drift_correction": True,     # learn & cancel slow yaw drift (no magnetometer)
+    "drift_center_tau_s": 30.0,   # slow pull back to centre when still near centre
 }
 
 
@@ -496,6 +498,58 @@ class HeadPose:
                 -roll if c["invert_roll"] else roll)
 
 
+class YawDrift:
+    """The Buds' orientation has no magnetometer, so yaw creeps. While the head
+    is still, the raw yaw slope *is* the drift: learn it and cancel it. Also
+    pull slowly back to centre while still and within ~12° of centre, so any
+    leftover error bleeds away without fighting deliberate looks."""
+
+    WINDOW_S = 2.0
+    STILL_RANGE_DEG = 1.5
+    MAX_RATE = 1.5            # deg/s; anything faster is real movement
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.rate = 0.0       # learned drift, deg/s
+        self.reset()
+
+    def reset(self):
+        self.offset = 0.0
+        self.hist = []        # (t, raw yaw unwrapped)
+        self.prev = None
+        self.unwrap = 0.0
+
+    def apply(self, yaw, now):
+        if self.prev is not None:
+            self.unwrap += (yaw - self.prev + 180) % 360 - 180
+        else:
+            self.unwrap = yaw
+        self.prev = yaw
+        raw = self.unwrap
+        dt = (now - self.hist[-1][0]) if self.hist else 0.0
+        self.hist.append((now, raw))
+        while self.hist and now - self.hist[0][0] > self.WINDOW_S:
+            self.hist.pop(0)
+        if not self.cfg.get("drift_correction", True):
+            return yaw
+        self.offset += self.rate * dt
+        still = False
+        if len(self.hist) > 10 and now - self.hist[0][0] > 0.8 * self.WINDOW_S:
+            ys = [y for _, y in self.hist]
+            if max(ys) - min(ys) < self.STILL_RANGE_DEG:
+                still = True
+                t0, y0 = self.hist[0]
+                slope = (raw - y0) / max(1e-3, now - t0)
+                if abs(slope) < self.MAX_RATE:
+                    self.rate += (slope - self.rate) * min(1.0, dt / 5.0)
+        out = raw - self.offset
+        tau = float(self.cfg.get("drift_center_tau_s", 30.0))
+        if still and tau > 0 and abs(out) < 12.0:
+            self.offset += out * min(1.0, dt / tau)
+            out = raw - self.offset
+        return (out + 180) % 360 - 180
+
+
 # ---- outputs -----------------------------------------------------------------
 class OpentrackOut:
     def __init__(self, cfg):
@@ -620,6 +674,7 @@ class Engine:
         self.out_name = None
         self.smoothed = None
         self.last = None
+        self.drift = YawDrift(cfg)
         self.stop_evt = threading.Event()
         self.battery = None
         self.link = BudsLink(cfg.get("device", ""), self.pose.feed, self._set_status, verbose,
@@ -689,6 +744,7 @@ class Engine:
 
     def recenter(self):
         self.pose.recenter()
+        self.drift.reset()
         self.smoothed = None
         if isinstance(self.out, MouseOut):
             self.out.reset()
@@ -711,6 +767,7 @@ class Engine:
             t0 = time.monotonic()
             a = self.pose.angles()
             if a is not None:
+                a = (self.drift.apply(a[0], t0), a[1], a[2])
                 alpha = 1.0 - 0.9 * max(0.0, min(1.0, self.cfg["smoothing"]))
                 if self.smoothed is None:
                     self.smoothed = list(a)
@@ -808,6 +865,9 @@ def run_gui(engine, cfg):
         invs[k] = cb
         inv.addWidget(cb)
     lay.addLayout(inv)
+    drift_cb = QtWidgets.QCheckBox("Yaw drift correction (learns and cancels slow sideways creep)")
+    drift_cb.setChecked(cfg.get("drift_correction", True))
+    lay.addWidget(drift_cb)
 
     btns = QtWidgets.QHBoxLayout()
     b_center = QtWidgets.QPushButton("Recenter")
@@ -830,6 +890,7 @@ def run_gui(engine, cfg):
             cfg[f"joy_range_{k}"] = float(sb.value())
         for k, cb in invs.items():
             cfg[f"invert_{k}"] = cb.isChecked()
+        cfg["drift_correction"] = drift_cb.isChecked()
         save_config(cfg)
 
     out.currentIndexChanged.connect(lambda _: (engine.set_output(out.currentData()), persist()))
@@ -839,6 +900,7 @@ def run_gui(engine, cfg):
         sb.valueChanged.connect(lambda _: persist())
     for cb in invs.values():
         cb.toggled.connect(lambda _: persist())
+    drift_cb.toggled.connect(lambda _: persist())
     b_center.clicked.connect(engine.recenter)
     b_pause.toggled.connect(lambda on: setattr(engine, "enabled", not on))
 
@@ -881,7 +943,8 @@ def run_gui(engine, cfg):
             bars[name].setValue(int(max(-90, min(90, a[i]))) if a else 0)
         now = time.monotonic()
         if now - last_n[1] >= 1.0:
-            rate.setText(f"{(engine.link.samples - last_n[0]) / (now - last_n[1]):.0f}")
+            rate.setText(f"{(engine.link.samples - last_n[0]) / (now - last_n[1]):.0f}"
+                         f"   (yaw drift {engine.drift.rate * 60:+.1f}°/min)")
             last_n[:] = [engine.link.samples, now]
     t = QtCore.QTimer()
     t.timeout.connect(tick)
