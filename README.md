@@ -15,7 +15,9 @@ earbud orientation into head yaw / pitch / roll, and sends it to games as:
 No phone, no extra hardware, no root. Inspired by
 [MousePods](https://github.com/starman-tech/mousepods), which does the same for AirPods.
 
-![BudsTrack window](docs/screenshot.png)
+| Connected and tracking | Waiting for the Buds |
+|---|---|
+| ![BudsTrack tracking](docs/screenshot-connected.png) | ![BudsTrack connecting](docs/screenshot.png) |
 
 ## Status
 
