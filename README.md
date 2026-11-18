@@ -48,7 +48,8 @@ python3 budstrack.py --send recenter|toggle|quit   # control a running instance
    chin down and hold for 4 s. This learns how the bud sits in your ear.
 3. **Recenter** while looking at the screen. Bind `budstrack.py --send recenter`
    to a global shortcut for in-game use.
-4. Pick an output.
+4. Pick an output. For the virtual joystick, **Joystick range** sets the head angle that
+   gives full deflection (e.g. ±35° so a small turn gives a full look).
 
 Sign conventions before inverting: yaw + = turn left, pitch + = look up,
 roll + = tilt right. Settings are saved in `~/.config/budstrack/config.json`.

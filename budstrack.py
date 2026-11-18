@@ -727,6 +727,20 @@ def run_gui(engine, cfg):
     sens.setSuffix(" px/°")
     form.addRow("Mouse speed", sens)
 
+    # Head angle that gives full joystick deflection (smaller = less neck turning).
+    jranges = {}
+    jrow = QtWidgets.QHBoxLayout()
+    for k, label in (("yaw", "Yaw ±"), ("pitch", "Pitch ±"), ("roll", "Roll ±")):
+        sb = QtWidgets.QSpinBox()
+        sb.setRange(5, 180)
+        sb.setValue(int(cfg[f"joy_range_{k}"]))
+        sb.setPrefix(label)
+        sb.setSuffix("°")
+        sb.setToolTip(f"Head {k} angle that gives full joystick deflection")
+        jranges[k] = sb
+        jrow.addWidget(sb)
+    form.addRow("Joystick range", jrow)
+
     inv = QtWidgets.QHBoxLayout()
     invs = {}
     for k in ("yaw", "pitch", "roll"):
@@ -753,6 +767,8 @@ def run_gui(engine, cfg):
         cfg["output"] = out.currentData()
         cfg["smoothing"] = smooth.value() / 100.0
         cfg["mouse_px_per_deg"] = sens.value()
+        for k, sb in jranges.items():
+            cfg[f"joy_range_{k}"] = float(sb.value())
         for k, cb in invs.items():
             cfg[f"invert_{k}"] = cb.isChecked()
         save_config(cfg)
@@ -760,6 +776,8 @@ def run_gui(engine, cfg):
     out.currentIndexChanged.connect(lambda _: (engine.set_output(out.currentData()), persist()))
     smooth.valueChanged.connect(lambda _: persist())
     sens.valueChanged.connect(lambda _: persist())
+    for sb in jranges.values():
+        sb.valueChanged.connect(lambda _: persist())
     for cb in invs.values():
         cb.toggled.connect(lambda _: persist())
     b_center.clicked.connect(engine.recenter)
