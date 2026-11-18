@@ -41,7 +41,28 @@ MSG_SET_SPATIAL_AUDIO = 0x7C
 MSG_SPATIAL_AUDIO_DATA = 0xC2
 MSG_SPATIAL_AUDIO_CONTROL = 0xC3
 CTL_ATTACH, CTL_DETACH, CTL_ATTACH_OK, CTL_DETACH_OK, CTL_KEEPALIVE = 0, 1, 2, 3, 4
+MSG_STATUS_UPDATED, MSG_EXTENDED_STATUS_UPDATED = 0x60, 0x61
+PLACEMENT = {0: "disconnected", 1: "worn", 2: "not worn", 3: "in case", 4: "charging"}
 DATA_GRV, DATA_WEAR_ON, DATA_WEAR_OFF, DATA_GYROCAL, DATA_STUCK = 0x20, 0x21, 0x22, 0x23, 0x24
+
+
+def parse_battery(mid, pl):
+    """Battery / placement from STATUS_UPDATED (0x60) or EXTENDED_STATUS_UPDATED
+    (0x61), Buds+ and newer layout (per GalaxyBudsClient)."""
+    try:
+        if mid == MSG_EXTENDED_STATUS_UPDATED:
+            l, r, place, case = pl[2], pl[3], pl[6], pl[7]
+            charge = None
+        else:
+            l, r, place, case = pl[1], pl[2], pl[5], pl[6]
+            charge = pl[7] if len(pl) > 7 else None
+    except IndexError:
+        return None
+    b = {"L": l, "R": r, "case": case,
+         "place_L": (place >> 4) & 0xF, "place_R": place & 0xF}
+    if charge is not None:
+        b["chg_L"], b["chg_R"], b["chg_case"] = bool(charge & 0x10), bool(charge & 0x04), bool(charge & 0x01)
+    return b
 
 
 def crc16(data):
@@ -202,8 +223,9 @@ class BudsLink:
     """Gets an RFCOMM fd for the Buds' SPP service via a BlueZ Profile1, then
     runs attach / keep-alive / read on it. Calls on_quat(q) for each sample."""
 
-    def __init__(self, mac, on_quat, on_status, verbose=False):
+    def __init__(self, mac, on_quat, on_status, verbose=False, on_battery=None):
         self.mac, self.on_quat, self.on_status, self.verbose = mac, on_quat, on_status, verbose
+        self.on_battery = on_battery
         self.sock = None
         self.stop_evt = threading.Event()
         self.fd_q = queue.Queue()
@@ -335,6 +357,10 @@ class BudsLink:
             for mid, pl in parser.feed(data):
                 if self.verbose and mid != MSG_SPATIAL_AUDIO_DATA:
                     print(f"rx id=0x{mid:02X} {pl.hex()}", file=sys.stderr)
+                if mid in (MSG_STATUS_UPDATED, MSG_EXTENDED_STATUS_UPDATED) and self.on_battery:
+                    b = parse_battery(mid, pl)
+                    if b:
+                        self.on_battery(b)
                 if mid == MSG_SPATIAL_AUDIO_CONTROL and pl:
                     if pl[0] == CTL_ATTACH_OK:
                         self.on_status(f"Tracking ({name})")
@@ -593,12 +619,41 @@ class Engine:
         self.smoothed = None
         self.last = None
         self.stop_evt = threading.Event()
-        self.link = BudsLink(cfg.get("device", ""), self.pose.feed, self._set_status, verbose)
+        self.battery = None
+        self.link = BudsLink(cfg.get("device", ""), self.pose.feed, self._set_status, verbose,
+                             on_battery=self._set_battery)
         self._lock = threading.Lock()
 
     def _set_status(self, s):
         self.status = s
         print(s, file=sys.stderr, flush=True)
+
+    def _set_battery(self, b):
+        old = self.battery or {}
+        # Keep previous charging flags if this message type doesn't carry them.
+        for k in ("chg_L", "chg_R", "chg_case"):
+            b.setdefault(k, old.get(k, False))
+        self.battery = b
+
+    def battery_text(self):
+        b = self.battery
+        if not b:
+            return "-"
+        parts = []
+        for side in ("L", "R"):
+            place = b[f"place_{side}"]
+            if place == 0 or not 0 < b[side] <= 100:
+                parts.append(f"{side} -")
+                continue
+            t = f"{side} {b[side]}%"
+            if b[f"chg_{side}"]:
+                t += " ⚡"
+            elif place in (3, 4):
+                t += " (case)"
+            parts.append(t)
+        c = b["case"]
+        parts.append(f"Case {c}%" + (" ⚡" if b["chg_case"] else "") if 0 < c <= 100 else "Case -")
+        return "   ".join(parts)
 
     def start(self):
         threading.Thread(target=self._link_run, daemon=True).start()
@@ -708,6 +763,8 @@ def run_gui(engine, cfg):
         form.addRow(name, b)
     rate = QtWidgets.QLabel("-")
     form.addRow("Samples/s", rate)
+    batt = QtWidgets.QLabel("-")
+    form.addRow("Battery", batt)
 
     out = QtWidgets.QComboBox()
     for key, label in (("opentrack", "opentrack (UDP 4242)"), ("joystick", "Virtual joystick"),
@@ -816,6 +873,7 @@ def run_gui(engine, cfg):
         if engine.pose.q is not None and not cfg.get("lat_body"):
             s += "\nNot calibrated yet: click Calibrate… (one time)."
         status.setText(s)
+        batt.setText(engine.battery_text())
         a = engine.last
         for i, name in enumerate(("Yaw", "Pitch", "Roll")):
             bars[name].setValue(int(max(-90, min(90, a[i]))) if a else 0)

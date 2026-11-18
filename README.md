@@ -21,6 +21,7 @@ No phone, no extra hardware, no root. Inspired by
 - Probably works on other Buds with 360 Audio head tracking that use the same
   SPP service (Buds2 Pro, Buds3, ...), but that is untested. Reports welcome.
 - The Buds stream orientation at ~28 Hz; BudsTrack smooths and outputs at 120 Hz.
+- Shows earbud and case battery (from the Buds' status messages, `0x60` / `0x61`).
 
 ## Requirements
 
